@@ -1,7 +1,6 @@
 // ============================================
 // FIREBASE CONFIGURATION
 // ============================================
-// REPLACE THESE WITH YOUR ACTUAL FIREBASE CONFIG
 
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
 import { 
@@ -33,7 +32,7 @@ const firebaseConfig = {
     apiKey: "AIzaSyCxZHeN6T_duSGRis2api7vp84pmNcWW0c",
     authDomain: "gorsaryshop.firebaseapp.com",
     projectId: "gorsaryshop",
-    storageBucket: "gorsaryshop.firebasestorage.app",
+    storageBucket: "gorsaryshop.firebasestorage.app", // Not used for images anymore, but required for init
     messagingSenderId: "561619543692",
     appId: "1:561619543692:web:ed5ec19f92f654d9b2bda9",
     measurementId: "G-3QX3K67V93"
@@ -43,6 +42,16 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// ============================================
+// SUPABASE CONFIGURATION (FOR IMAGES)
+// ============================================
+// ⚠️ REPLACE THESE WITH YOUR KEYS FROM SUPABASE DASHBOARD -> SETTINGS -> API
+const SUPABASE_URL = 'https://vhggffmlouoxzdbkvzij.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoZ2dmZm1sb3VveHpkYmt2emlqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQ0MjU5MjYsImV4cCI6MjA4MDAwMTkyNn0.tm_-_MUWF0kY6hO-9LzUqDy1GiAyDkinbVK-wOgF310';
+
+// Initialize Supabase Client (Available globally because of the <script> tag in index.html)
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ============================================
 // STATE VARIABLES
@@ -468,7 +477,7 @@ onAuthStateChanged(auth, async (user) => {
 });
 
 // ============================================
-// ADMIN: PRODUCT MANAGEMENT
+// ADMIN: PRODUCT MANAGEMENT (WITH SUPABASE IMAGE UPLOAD)
 // ============================================
 
 async function loadAdminProducts() {
@@ -484,14 +493,18 @@ async function loadAdminProducts() {
         tbody.innerHTML = '';
         
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="4" class="loading">No products yet. Add your first product!</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="loading">No products yet. Add your first product!</td></tr>';
             return;
         }
         
         snapshot.forEach(docSnap => {
             const product = { id: docSnap.id, ...docSnap.data() };
+            // Use placeholder if no image
+            const imgUrl = product.imageUrl || 'https://via.placeholder.com/50?text=No+Img';
+            
             const tr = document.createElement('tr');
             tr.innerHTML = `
+                <td><img src="${imgUrl}" class="admin-prod-thumb" alt="${product.name}"></td>
                 <td><strong>${product.name}</strong></td>
                 <td>$${product.price.toFixed(2)}</td>
                 <td>${product.stock}</td>
@@ -514,6 +527,8 @@ window.saveProduct = async function() {
     const name = document.getElementById('prod-name').value.trim();
     const price = parseFloat(document.getElementById('prod-price').value);
     const stock = parseInt(document.getElementById('prod-stock').value);
+    const imageInput = document.getElementById('prod-image');
+    const existingImage = document.getElementById('prod-existing-image').value;
     
     if (!name || isNaN(price) || isNaN(stock)) {
         alert("Please fill all fields correctly");
@@ -528,10 +543,50 @@ window.saveProduct = async function() {
     showLoading(true);
     
     try {
+        let imageUrl = existingImage; // Default to existing if editing and no new file
+
+        // ============================================
+        // SUPABASE UPLOAD LOGIC
+        // ============================================
+        if (imageInput.files.length > 0) {
+            const file = imageInput.files[0];
+            
+            // Create a unique file name to prevent collisions
+            // Removes spaces and appends timestamp
+            const fileExt = file.name.split('.').pop();
+            const fileName = `product_${Date.now()}.${fileExt}`;
+            
+            console.log("📤 Uploading image to Supabase...", fileName);
+            
+            // 1. Upload the file to the 'products' bucket
+            const { data, error } = await supabase
+                .storage
+                .from('products')
+                .upload(fileName, file);
+
+            if (error) {
+                console.error("Supabase Upload Error:", error);
+                throw new Error("Image Upload Failed: " + error.message);
+            }
+
+            console.log("✅ Upload successful:", data);
+
+            // 2. Get the Public URL to save in Firestore
+            const { data: urlData } = supabase
+                .storage
+                .from('products')
+                .getPublicUrl(fileName);
+                
+            imageUrl = urlData.publicUrl;
+            console.log("🔗 Image Public URL:", imageUrl);
+        }
+        // ============================================
+
         const productData = {
             name: name,
             price: price,
             stock: stock,
+            imageUrl: imageUrl, // Add image URL to Firestore data
             updatedAt: serverTimestamp()
         };
         
@@ -560,6 +615,12 @@ window.editProduct = function(product) {
     document.getElementById('prod-price').value = product.price;
     document.getElementById('prod-stock').value = product.stock;
     
+    // Store existing image URL in hidden field
+    document.getElementById('prod-existing-image').value = product.imageUrl || '';
+    
+    // Reset file input so it doesn't look like a new file is pending unless user picks one
+    document.getElementById('prod-image').value = '';
+
     document.querySelector('.card').scrollIntoView({ behavior: 'smooth' });
 }
 
@@ -587,6 +648,8 @@ window.resetProdForm = function() {
     document.getElementById('prod-name').value = '';
     document.getElementById('prod-price').value = '';
     document.getElementById('prod-stock').value = '';
+    document.getElementById('prod-image').value = '';
+    document.getElementById('prod-existing-image').value = '';
 }
 
 // ============================================
@@ -663,14 +726,16 @@ async function loadClientProducts() {
         
         snapshot.forEach(docSnap => {
             const product = { id: docSnap.id, ...docSnap.data() };
+            const imgUrl = product.imageUrl || 'https://via.placeholder.com/300x200?text=No+Image';
             
             if (product.stock > 0) {
                 const div = document.createElement('div');
                 div.className = 'product-card';
                 div.innerHTML = `
+                    <img src="${imgUrl}" class="product-card-img" alt="${product.name}">
                     <h4>${product.name}</h4>
                     <span class="product-price">$${product.price.toFixed(2)}</span>
-                    <small>Stock: ${product.stock}</small><br><br>
+                    <small>Stock: ${product.stock}</small>
                     <button class="btn" onclick='addToCart(${JSON.stringify(product)})'>Add to Cart</button>
                 `;
                 grid.appendChild(div);
@@ -827,72 +892,65 @@ window.checkout = async function() {
 }
 
 // ============================================
-// CLIENT: ORDER HISTORY - FIXED
+// CLIENT: ORDER HISTORY - FIXED COMPLETED
 // ============================================
 
 async function loadOrderHistory() {
     try {
         console.log("📦 Loading order history for user:", currentUser.uid);
-        
+
         const salesRef = collection(db, 'sales');
         const salesQuery = query(
-            salesRef, 
-            where('userId', '==', currentUser.uid), 
+            salesRef,
+            where('userId', '==', currentUser.uid),
             orderBy('createdAt', 'desc')
         );
+
         const snapshot = await getDocs(salesQuery);
-        
-        console.log("📊 Orders found:", snapshot.size);
-        
-        const tbody = document.querySelector('#order-history-table tbody');
-        if (!tbody) {
-            console.error("❌ Order history table not found");
+
+        const container = document.getElementById('order-history');
+        if (!container) {
+            console.error("❌ Order history container not found!");
             return;
         }
-        
-        tbody.innerHTML = '';
-        
+
+        container.innerHTML = '';
+
         if (snapshot.empty) {
-            tbody.innerHTML = '<tr><td colspan="3" class="loading">No orders yet. Start shopping!</td></tr>';
-            console.log("ℹ️ No orders found for this user");
+            container.innerHTML = `
+                <p class="empty-history">No orders found</p>
+            `;
             return;
         }
-        
+
         snapshot.forEach(docSnap => {
             const order = docSnap.data();
-            const date = order.createdAt ? new Date(order.createdAt.seconds * 1000).toLocaleString() : 'N/A';
-            
-            console.log("📦 Order:", {
-                id: docSnap.id,
-                date: date,
-                amount: order.totalAmount,
-                items: order.items
-            });
-            
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td>${date}</td>
-                <td><strong>$${order.totalAmount.toFixed(2)}</strong></td>
-                <td><span class="status-badge status-completed">Completed</span></td>
+            const date = order.createdAt
+                ? new Date(order.createdAt.seconds * 1000).toLocaleString()
+                : 'N/A';
+
+            const div = document.createElement('div');
+            div.className = 'order-card';
+            div.innerHTML = `
+                <h4>Order #${docSnap.id}</h4>
+                <p><strong>Date:</strong> ${date}</p>
+                <p><strong>Total:</strong> $${order.totalAmount.toFixed(2)}</p>
+                <p><strong>Items:</strong></p>
+                <ul>
+                    ${order.items.map(item => `
+                        <li>${item.name} — $${item.price.toFixed(2)} × ${item.qty}</li>
+                    `).join('')}
+                </ul>
+                <span class="status-badge status-completed">Completed</span>
             `;
-            tbody.appendChild(tr);
+
+            container.appendChild(div);
         });
-        
+
         console.log("✅ Order history loaded successfully");
     } catch (error) {
         console.error("❌ Error loading order history:", error);
-        console.error("Error code:", error.code);
         console.error("Error details:", error.message);
-        
-        const tbody = document.querySelector('#order-history-table tbody');
-        if (tbody) {
-            if (error.code === 'failed-precondition') {
-                tbody.innerHTML = '<tr><td colspan="3" class="loading">⚠️ Database index required. Check console for link.</td></tr>';
-                console.error("🔗 Create index at:", error.message);
-            } else {
-                tbody.innerHTML = '<tr><td colspan="3" class="loading">Error loading orders. Check console for details.</td></tr>';
-            }
-        }
     }
 }
 

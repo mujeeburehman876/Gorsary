@@ -6,6 +6,9 @@
     <title>GSMS - Advanced Shopping System</title>
     <link rel="stylesheet" href="style.css">
     
+    <!-- Supabase SDK (For Image Uploads) -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+
     <!-- Firebase SDK v9+ (Modular) -->
     <script type="module" src="app.js"></script>
 </head>
@@ -110,6 +113,14 @@
                         <h4>Add / Update Item</h4>
                         <br>
                         <input type="hidden" id="prod-id">
+                        <!-- Hidden input to store existing image URL during edits -->
+                        <input type="hidden" id="prod-existing-image">
+                        
+                        <div class="form-group">
+                            <label>Product Image</label>
+                            <input type="file" id="prod-image" accept="image/*">
+                        </div>
+
                         <div class="form-group">
                             <label>Product Name</label>
                             <input type="text" id="prod-name">
@@ -133,6 +144,7 @@
                             <table id="admin-table">
                                 <thead>
                                     <tr>
+                                        <th>Image</th>
                                         <th>Name</th>
                                         <th>Price</th>
                                         <th>Stock</th>
@@ -140,7 +152,7 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr><td colspan="4" class="loading">Loading products...</td></tr>
+                                    <tr><td colspan="5" class="loading">Loading products...</td></tr>
                                 </tbody>
                             </table>
                         </div>
@@ -215,18 +227,7 @@
                 <div class="card" style="margin-top: 2rem;">
                     <h4>Your Order History</h4>
                     <div class="table-container">
-                        <table id="order-history-table">
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Amount</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td colspan="3" class="loading">Loading orders...</td></tr>
-                            </tbody>
-                        </table>
+                        <div id="order-history"></div>
                     </div>
                 </div>
             </div>
@@ -240,4 +241,4 @@
     </div>
 
 </body>
-</html>
+</html> 
